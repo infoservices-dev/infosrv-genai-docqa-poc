@@ -1,0 +1,32 @@
+[project]
+name = "infosrv-genai-docqa-poc"
+version = "0.1.0"
+description = "GenAI-powered Document Q&A System POC on AWS"
+authors = [
+    { name = "Gowtham Chinnathambi", email = "dev@infoservices.com" }
+]
+readme = "README.md"
+license = { text = "MIT" }
+keywords = ["AWS", "GenAI", "Document Q&A", "POC"]
+classifiers = [
+    "Programming Language :: Python :: 3.11",
+    "Operating System :: OS Independent",
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Topic :: Software Development :: Libraries",
+]
+
+[project.urls]
+"Homepage" = "https://github.com/infoservices-dev/infosrv-genai-docqa-poc"
+"Repository" = "https://github.com/infoservices-dev/infosrv-genai-docqa-poc"
+
+[build-system]
+requires = ["setuptools>=65.5.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.black]
+line-length = 88
+target-version = ['py311']
+
+[tool.isort]
+profile = "black"

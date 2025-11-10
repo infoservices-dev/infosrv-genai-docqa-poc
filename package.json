@@ -1,0 +1,26 @@
+{
+  "name": "infosrv-genai-docqa-poc",
+  "version": "0.0.1",
+  "scripts": {
+    "print": "serverless print",
+    "plan": "serverless deploy",
+    "deploy": "serverless deploy",
+    "logs": "serverless logs",
+    "remove": "serverless remove",
+    "build": "serverless package"
+  },
+  "author": "developers@infoservices.com",
+  "dependencies": {
+    "serverless": "3.34.0",
+    "serverless-cloudformation-changesets": "^0.0.1"
+  },
+  "devDependencies": {
+    "serverless-deployment-bucket": "^1.6.0",
+    "serverless-iam-roles-per-function": "^3.2.0",
+    "serverless-plugin-diff": "^3.0.0",
+    "serverless-plugin-git-variables": "^5.2.0",
+    "serverless-python-requirements": "^6.1.0",
+    "serverless-resources-env": "^0.3.1",
+    "serverless-step-functions": "^3.14.0"
+  }
+}

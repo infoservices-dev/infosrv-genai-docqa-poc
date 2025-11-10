@@ -1,0 +1,25 @@
+Description: DynamoDB Table for RAG routing configuration (Category Map).
+Resources:
+  RoutingConfigurationTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: ${self:service}-${sls:stage}-data-classification
+      # Primary Key: The key the Router Agent classifies the query into (e.g., 'policy_holder_details')
+      KeySchema:
+        - AttributeName: category_id
+          KeyType: HASH
+      
+      AttributeDefinitions:
+        - AttributeName: category_id
+          AttributeType: S
+          
+      BillingMode: PAY_PER_REQUEST 
+      
+      # The remaining attributes are stored on the item itself (vector_collection_name, description, etc.)
+
+Outputs:
+  RoutingConfigurationTableName:
+    Description: Name of the DynamoDB table created for RAG routing configuration.
+    Value: !Ref RoutingConfigurationTable
+    Export:
+      Name: RAGRoutingConfigurationTableNameExport

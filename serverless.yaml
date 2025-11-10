@@ -1,0 +1,191 @@
+service: genai-docqa-poc
+frameworkVersion: '3'
+
+plugins:
+  - serverless-deployment-bucket
+  - serverless-iam-roles-per-function
+  - serverless-step-functions
+
+custom:
+  VpcId: vpc-083f9210775db3680
+  PublicSubnet1: subnet-02d6166fbdbecec35
+  PublicSubnet2: subnet-094b83c046aef917e
+  PublicSubnet3: subnet-094315b36d91386cf
+  streamlitImage: ${aws:accountId}.dkr.ecr.${aws:region}.amazonaws.com/${self:service}-${sls:stage}-streamlit:latest
+
+provider:
+  name: aws
+  region: us-east-1
+  runtime: python3.11
+  architecture: arm64
+  deploymentBucket:
+    name: ${self:service}-${sls:stage}-deployment-bucket
+  environment:
+    BEDROCK_MODEL_ID: anthropic.claude-3-sonnet-20240229-v1:0
+  ecr:
+    images:
+      retrieval-agent:
+        path: ./
+        file: Dockerfile.retrieval
+        platform: linux/arm64
+      streamlit-app:
+        path: ./
+        file: Dockerfile.streamlit
+        platform: linux/arm64
+  apiGateway:
+    apiKeys:
+      - ${self:service}-${sls:stage}-api-keyv2
+    usagePlan:
+      quota:
+        limit: 10000
+        period: DAY
+      throttle:
+        rateLimit: 100
+        burstLimit: 200
+  iamRoleStatements:
+    - Effect: Allow
+      Action:
+        - states:StartExecution
+        - states:StartSyncExecution
+      Resource: "*"
+    - Effect: Allow
+      Action:
+        - logs:CreateLogGroup
+        - logs:CreateLogStream
+        - logs:PutLogEvents
+      Resource: "*"
+
+stepFunctions:
+  stateMachines:
+    DocQAStateMachine:
+      name: ${self:service}-${sls:stage}-docqa-agent-orchestrator
+      type: EXPRESS
+      loggingConfig:
+        level: ERROR
+        includeExecutionData: true
+        destinations:
+          - Fn::GetAtt: [DocQALogGroup, Arn]
+      events:
+        - http:
+            path: /agent/invoke
+            method: post
+            cors: true
+            private: true
+            action: StartSyncExecution
+      definition:
+        Comment: "POC: Multi-agent GenAI DocQA orchestration"
+        StartAt: RouterAgent
+        States:
+          RouterAgent:
+            Type: Task
+            Resource:
+              Fn::GetAtt: [RouterAgentLambdaFunction, Arn]
+            ResultPath: "$.routerResult"
+            Next: RouterDecision
+            Catch:
+              - ErrorEquals: ["States.ALL"]
+                Next: ErrorHandler
+
+          RouterDecision:
+            Type: Choice
+            Choices:
+              - Variable: "$.routerResult.next_agent"
+                StringEquals: "SynthesisAgent"
+                Next: SynthesisAgent
+            Default: RetrievalAgent
+
+          RetrievalAgent:
+            Type: Task
+            Resource:
+              Fn::GetAtt: [RetrievalAgentV2LambdaFunction, Arn]
+            Parameters:
+              query.$: "$.routerResult.query"
+              context_data.$: "$.routerResult.context_data"
+            ResultPath: "$.retrievalResult"
+            Next: SynthesisAgent
+            Catch:
+              - ErrorEquals: ["States.ALL"]
+                Next: ErrorHandler
+
+          SynthesisAgent:
+            Type: Task
+            Resource:
+              Fn::GetAtt: [SynthesisAgentLambdaFunction, Arn]
+            # Pass the full event to Lambda to handle missing retrievalResult
+            Parameters:
+              event.$: "$"
+            ResultPath: "$.synthesisResult"
+            Next: Success
+            Catch:
+              - ErrorEquals: ["States.ALL"]
+                Next: ErrorHandler
+
+          Success:
+            Type: Succeed
+            InputPath: "$.synthesisResult"
+
+          ErrorHandler:
+            Type: Pass
+            Result:
+              status: "ERROR"
+              message: "Workflow execution failed"
+            ResultPath: "$.errorResult"
+            Next: Failure
+
+          Failure:
+            Type: Fail
+            Cause: "DocQA workflow failed"
+
+functions:
+  routerAgent:
+    handler: src/agents/router_agent.lambda_handler
+    timeout: 60
+    architecture: arm64
+    environment:
+      ROUTING_TABLE_NAME:
+        Ref: RoutingConfigurationTable
+    iamRoleStatements:
+      - Effect: Allow
+        Action:
+          - dynamodb:Scan
+          - dynamodb:GetItem
+        Resource:
+          - Fn::GetAtt: [RoutingConfigurationTable, Arn]
+      - Effect: Allow
+        Action:
+          - bedrock:InvokeModel
+        Resource: "*"
+
+  retrievalAgentV2:
+    image:
+      name: retrieval-agent
+    timeout: 120
+    environment:
+      CHROMADB_ENDPOINT: ${cf:${self:service}-${sls:stage}.LoadBalancerDNS}
+    iamRoleStatements:
+      - Effect: Allow
+        Action:
+          - bedrock:InvokeModel
+        Resource: "*"
+
+  synthesisAgent:
+    handler: src/agents/synthesis_agent.lambda_handler
+    timeout: 180
+    architecture: arm64
+    iamRoleStatements:
+      - Effect: Allow
+        Action:
+          - bedrock:InvokeModel
+        Resource: "*"
+  streamlitApp:
+      image:
+        name: streamlit-app
+      timeout: 300
+
+package:
+  individually: true
+
+resources:
+  - ${file(./infra/resources/dynamodb.yaml)}
+  - ${file(./infra/resources/cloudwatch.yaml)}
+  - ${file(./infra/resources/ecs.yaml)}

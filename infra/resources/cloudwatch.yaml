@@ -1,0 +1,6 @@
+Resources:
+  DocQALogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: /aws/vendedlogs/states/${self:service}-${sls:stage}-docqa-agent
+      RetentionInDays: 7

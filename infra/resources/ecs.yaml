@@ -1,0 +1,260 @@
+Resources:
+  ECSCluster:
+    Type: AWS::ECS::Cluster
+    Properties:
+      ClusterName: ${self:service}-${sls:stage}-cluster
+      CapacityProviders:
+        - FARGATE
+      DefaultCapacityProviderStrategy:
+        - CapacityProvider: FARGATE
+          Weight: 1
+
+  ChromaDBTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: ${self:service}-${sls:stage}-chromadb
+      NetworkMode: awsvpc
+      RequiresCompatibilities:
+        - FARGATE
+      Cpu: 256
+      Memory: 512
+      ExecutionRoleArn: !Ref ECSExecutionRole
+      TaskRoleArn: !Ref ECSTaskRole
+      ContainerDefinitions:
+        - Name: chromadb
+          Image: chromadb/chroma
+          PortMappings:
+            - ContainerPort: 8000
+              Protocol: tcp
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref CloudWatchLogGroup
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: chromadb
+
+  ChromaDBService:
+    Type: AWS::ECS::Service
+    DependsOn: LoadBalancerListener
+    Properties:
+      ServiceName: ${self:service}-${sls:stage}-chromadb-service
+      Cluster: !Ref ECSCluster
+      TaskDefinition: !Ref ChromaDBTaskDefinition
+      DesiredCount: 1
+      LaunchType: FARGATE
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIp: ENABLED
+          SecurityGroups:
+            - !Ref ECSSecurityGroup
+          Subnets:
+            - ${self:custom.PublicSubnet1}
+            - ${self:custom.PublicSubnet2}
+      LoadBalancers:
+        - ContainerName: chromadb
+          ContainerPort: 8000
+          TargetGroupArn: !Ref TargetGroup
+
+  ApplicationLoadBalancer:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Name: ${self:service}-${sls:stage}-alb
+      Scheme: internet-facing
+      Type: application
+      Subnets:
+        - ${self:custom.PublicSubnet1}
+        - ${self:custom.PublicSubnet2}
+      SecurityGroups:
+        - !Ref ALBSecurityGroup
+
+  TargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: ${self:service}-${sls:stage}-tg
+      Port: 8000
+      Protocol: HTTP
+      VpcId: ${self:custom.VpcId}
+      TargetType: ip
+      HealthCheckPath: /api/v2/heartbeat
+
+  LoadBalancerListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref TargetGroup
+      LoadBalancerArn: !Ref ApplicationLoadBalancer
+      Port: 8000
+      Protocol: HTTP
+
+  ECSExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: ${self:service}-${sls:stage}-ecs-execution-role
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+
+  ECSTaskRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: ${self:service}-${sls:stage}-ecs-task-role
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+
+  ECSSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: ${self:service}-${sls:stage}-ecs-sg
+      GroupDescription: Security group for ECS tasks
+      VpcId: ${self:custom.VpcId}
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 8000
+          ToPort: 8000
+          SourceSecurityGroupId: !Ref ALBSecurityGroup
+        - IpProtocol: tcp
+          FromPort: 8501
+          ToPort: 8501
+          SourceSecurityGroupId: !Ref ALBSecurityGroup
+
+  ALBSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: ${self:service}-${sls:stage}-alb-sg
+      GroupDescription: Security group for Application Load Balancer
+      VpcId: ${self:custom.VpcId}
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 8000
+          ToPort: 8000
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 8501
+          ToPort: 8501
+          CidrIp: 0.0.0.0/0
+
+  CloudWatchLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: /ecs/${self:service}-${sls:stage}-chromadb
+      RetentionInDays: 14
+
+  StreamlitTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: ${self:service}-${sls:stage}-streamlit
+      NetworkMode: awsvpc
+      RequiresCompatibilities:
+        - FARGATE
+      Cpu: 512
+      Memory: 1024
+      ExecutionRoleArn: !Ref ECSExecutionRole
+      TaskRoleArn: !Ref ECSTaskRole
+      ContainerDefinitions:
+        - Name: streamlit
+          Image: ${self:custom.streamlitImage}
+          PortMappings:
+            - ContainerPort: 8501
+              Protocol: tcp
+          Environment:
+            - Name: CHROMADB_HOST
+              Value: !GetAtt ApplicationLoadBalancer.DNSName
+            - Name: CHROMADB_PORT
+              Value: "8000"
+            - Name: API_ENDPOINT
+              Value: !Sub "https://${ApiGatewayRestApi}.execute-api.${AWS::Region}.amazonaws.com/${sls:stage}/agent/invoke"
+            - Name: API_KEY
+              Value: ${self:provider.apiGateway.apiKeys.0}
+            - Name: STATE_MACHINE_ARN
+              Value: !Sub "arn:aws:states:${aws:region}:${aws:accountId}:stateMachine:${self:service}-${sls:stage}-docqa-agent-orchestrator"
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref StreamlitLogGroup
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: streamlit
+
+  StreamlitService:
+    Type: AWS::ECS::Service
+    DependsOn: StreamlitListener
+    Properties:
+      ServiceName: ${self:service}-${sls:stage}-streamlit-service
+      Cluster: !Ref ECSCluster
+      TaskDefinition: !Ref StreamlitTaskDefinition
+      DesiredCount: 0
+      LaunchType: FARGATE
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIp: ENABLED
+          SecurityGroups:
+            - !Ref ECSSecurityGroup
+          Subnets:
+            - ${self:custom.PublicSubnet1}
+            - ${self:custom.PublicSubnet2}
+      LoadBalancers:
+        - ContainerName: streamlit
+          ContainerPort: 8501
+          TargetGroupArn: !Ref StreamlitTargetGroup
+
+  StreamlitTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: ${self:service}-${sls:stage}-st-tg
+      Port: 8501
+      Protocol: HTTP
+      VpcId: ${self:custom.VpcId}
+      TargetType: ip
+      HealthCheckPath: /_stcore/health
+      HealthCheckIntervalSeconds: 30
+      HealthCheckTimeoutSeconds: 5
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 3
+      Matcher:
+        HttpCode: 200,301,302
+
+  StreamlitListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref StreamlitTargetGroup
+      LoadBalancerArn: !Ref ApplicationLoadBalancer
+      Port: 8501
+      Protocol: HTTP
+
+  StreamlitLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: /ecs/${self:service}-${sls:stage}-streamlit
+      RetentionInDays: 14
+
+Outputs:
+  LoadBalancerDNS:
+    Description: DNS name of the load balancer
+    Value: !GetAtt ApplicationLoadBalancer.DNSName
+    Export:
+      Name: ${self:service}-${sls:stage}-alb-dns
+
+  ECSClusterName:
+    Description: Name of the ECS cluster
+    Value: !Ref ECSCluster
+    Export:
+      Name: ${self:service}-${sls:stage}-cluster-name
+
+  StreamlitURL:
+    Description: URL of the Streamlit application
+    Value: !Sub "http://${ApplicationLoadBalancer.DNSName}:8501"
+    Export:
+      Name: ${self:service}-${sls:stage}-streamlit-url

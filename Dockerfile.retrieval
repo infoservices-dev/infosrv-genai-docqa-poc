@@ -1,0 +1,18 @@
+FROM public.ecr.aws/lambda/python:3.11-arm64
+
+# Upgrade pip
+RUN pip install --upgrade pip
+
+# Install latest NumPy 2.x pre-built wheel
+RUN pip install "numpy>=2.2.6,<2.3" --only-binary=:all:
+
+# Copy requirements (without numpy) and install
+COPY requirements.txt ${LAMBDA_TASK_ROOT}
+RUN pip install -r requirements.txt
+
+# Copy function code
+COPY src/agents/retrieval_agent.py ${LAMBDA_TASK_ROOT}
+COPY src/ ${LAMBDA_TASK_ROOT}/src/
+
+# Set the CMD to your handler
+CMD ["retrieval_agent.lambda_handler"]

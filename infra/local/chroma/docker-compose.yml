@@ -1,0 +1,9 @@
+services:
+  server:
+    image: chromadb/chroma
+    ports:
+      - "8000:8000"
+    networks:
+      - internal
+networks:
+  internal:
