@@ -38,8 +38,7 @@ def render_chatbot_tab():
     
     init_session_state()
     
-    with st.expander("🔧 API Configuration", expanded=False):
-        api_endpoint, api_key, state_machine_arn = render_api_config()
+    api_endpoint, api_key, state_machine_arn = render_api_config()
     
     if st.session_state.pending_query and st.session_state.is_processing:
         query_data = st.session_state.pending_query
@@ -101,28 +100,26 @@ def init_session_state():
             st.session_state[key] = value
 
 def render_api_config():
-    col1, col2 = st.columns(2)
-    with col1:
-        api_endpoint = st.text_input("API Endpoint", value=DEFAULT_API_CONFIG["endpoint"])
-        api_key = st.text_input("API Key", value=DEFAULT_API_CONFIG["api_key"], type="password")
-    with col2:
-        state_machine_arn = st.text_area("State Machine ARN", value=DEFAULT_API_CONFIG["state_machine_arn"], height=80)
-        
-        if st.button("🔍 Test"):
-            response = call_api("Hello", api_endpoint, api_key, state_machine_arn)
-            if response.get('success'):
-                st.success("✅ Connected")
-            else:
-                st.error(f"❌ Failed: {response.get('error', 'Unknown')}")
+    api_endpoint = DEFAULT_API_CONFIG["endpoint"]
+    api_key =  DEFAULT_API_CONFIG["api_key"]
+    state_machine_arn = DEFAULT_API_CONFIG["state_machine_arn"]
     
     return api_endpoint, api_key, state_machine_arn
 
 def render_suggested_questions(api_endpoint, api_key, state_machine_arn):
-    if not st.session_state.questions_loaded and not st.session_state.suggested_questions:
+    if not st.session_state.questions_loaded:
         load_questions(api_endpoint, api_key, state_machine_arn)
     
     if st.session_state.suggested_questions:
-        with st.expander("💡 Suggested Questions", expanded=True):
+        col_header1, col_header2 = st.columns([5, 1])
+        with col_header2:
+            if st.button("🔄", key="refresh_questions", 
+                        disabled=st.session_state.is_processing,
+                        help="Refresh questions"):
+                st.session_state.questions_loaded = False
+                st.rerun()
+        
+        with st.expander("💡 Suggested Questions", expanded=False):
             col1, col2 = st.columns(2)
             
             for i, question in enumerate(st.session_state.suggested_questions):
@@ -198,6 +195,8 @@ def call_api(query, api_endpoint, api_key, state_machine_arn, timeout=60):
             
             if 'output' in result and result['output']:
                 output_data = json.loads(result['output'])
+
+                print(result['output'])
                 
                 return {
                     'success': True,
@@ -251,6 +250,29 @@ def render_message(message):
                     with st.expander(f"📎 Sources ({len(unique_sources)})"):
                         for i, (source_uri, citation) in enumerate(unique_sources.items(), 1):
                             st.write(f"**[{i}]** {source_uri}")
+                            
+                            # Display citation content
+                            content = citation.get('content', citation.get('text', ''))
+                            if content:
+                                st.markdown(f"> {content[:300]}..." if len(content) > 300 else f"> {content}")
+                            
+                            # Display additional metadata
+                            metadata_items = []
+                            if 'page' in citation or 'page_number' in citation:
+                                page = citation.get('page', citation.get('page_number'))
+                                metadata_items.append(f"Page: {page}")
+                            if 'score' in citation or 'relevance_score' in citation:
+                                score = citation.get('score', citation.get('relevance_score'))
+                                metadata_items.append(f"Relevance: {score:.2f}")
+                            if 'document_title' in citation or 'title' in citation:
+                                title = citation.get('document_title', citation.get('title'))
+                                metadata_items.append(f"Title: {title}")
+                            
+                            if metadata_items:
+                                st.caption(" | ".join(metadata_items))
+                            
+                            if i < len(unique_sources):
+                                st.divider()
                 
                 if message.get('routing_category'):
                     st.info(f"🎯 {message['routing_category'].replace('_', ' ').title()}")

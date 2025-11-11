@@ -1,11 +1,11 @@
 import streamlit as st
 from pathlib import Path
 import sys
+import os
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from utils.config import config
-from utils.auth import check_authentication, render_login_page, logout
 from components.sidebar import render_sidebar as render_config_sidebar
 from tabs.ingestion_tab import render_ingestion_tab
 from tabs.chatbot_tab import render_chatbot_tab
@@ -64,13 +64,6 @@ def render_sidebar():
     with st.sidebar:
         st.divider()
         
-        # Add logout button
-        if st.button("🚪 Logout", use_container_width=True):
-            logout()
-            st.rerun()
-        
-        st.divider()
-        
         st.subheader("🔗 API Status")
         st.markdown("""
         <div class="api-status-connected">
@@ -95,11 +88,6 @@ def render_sidebar():
     return chunk_size, chunk_overlap
 
 def main():
-    # Check authentication first
-    if not check_authentication():
-        render_login_page()
-        return
-    
     init_session_state()
     render_sidebar()
     

@@ -1,5 +1,6 @@
 from pathlib import Path
 import sys
+import os
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
@@ -26,6 +27,10 @@ class AppConfig:
     
     # AWS Settings
     AWS_REGION = ingestion_config.AWS_REGION
+    
+    # Authentication Settings
+    auth_username = os.getenv('APP_USERNAME')
+    auth_password = os.getenv('APP_PASSWORD')
     
     @staticmethod
     def setup_logging():
